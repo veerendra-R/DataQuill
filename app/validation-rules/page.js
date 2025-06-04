@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import yaml from 'yaml';
 
 export default function ValidationRulesPage() {
   const router = useRouter();
@@ -10,6 +11,9 @@ export default function ValidationRulesPage() {
   const [rules, setRules] = useState([
     { columnName: '', dataType: '', allowNull: false, regex: '', min: '', max: '' },
   ]);
+  const [schemaText, setSchemaText] = useState('');
+  const [schemaFileName, setSchemaFileName] = useState('');
+  const [parseError, setParseError] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('dataSource');
@@ -25,6 +29,18 @@ export default function ValidationRulesPage() {
       try {
         const parsed = JSON.parse(storedRules);
         if (Array.isArray(parsed) && parsed.length > 0) setRules(parsed);
+      } catch {}
+    }
+    const storedSchema = localStorage.getItem('expectedSchema');
+    if (storedSchema) {
+      try {
+        const parsed = JSON.parse(storedSchema);
+        if (parsed.schemaText) setSchemaText(parsed.schemaText);
+        if (parsed.schemaFileName) setSchemaFileName(parsed.schemaFileName);
+        if (Array.isArray(parsed.rules) && parsed.rules.length) {
+          setRules(parsed.rules);
+          setColumns(parsed.rules.map(r => r.columnName));
+        }
       } catch {}
     }
   }, []);
@@ -44,8 +60,71 @@ export default function ValidationRulesPage() {
     setRules(rules.filter((_, i) => i !== index));
   };
 
+  const convertSchema = (obj) => {
+    if (!obj) return [];
+    let arr = [];
+    if (Array.isArray(obj)) arr = obj;
+    else if (Array.isArray(obj.columns)) arr = obj.columns;
+    else if (typeof obj === 'object')
+      arr = Object.entries(obj).map(([name, def]) => ({ columnName: name, ...def }));
+    return arr.map((r) => ({
+      columnName: r.columnName || r.name || r.field || '',
+      dataType: r.dataType || r.type || '',
+      allowNull: r.allowNull ?? false,
+      regex: r.regex || '',
+      min: r.min ?? '',
+      max: r.max ?? ''
+    }));
+  };
+
+  const parseSchemaString = (text, filename = '') => {
+    if (!text) return;
+    try {
+      setParseError('');
+      const ext = filename.split('.').pop().toLowerCase();
+      let data;
+      if (ext === 'yml' || ext === 'yaml') data = yaml.parse(text);
+      else if (ext === 'json') data = JSON.parse(text);
+      else {
+        try { data = JSON.parse(text); }
+        catch { data = yaml.parse(text); }
+      }
+      const newRules = convertSchema(data);
+      if (newRules.length) {
+        setRules(newRules);
+        setColumns(newRules.map(r => r.columnName));
+        localStorage.setItem('expectedSchema', JSON.stringify({ schemaFileName: filename, schemaText: text, rules: newRules }));
+      }
+    } catch (err) {
+      setParseError('Failed to parse schema: ' + err.message);
+    }
+  };
+
+  const handleSchemaFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSchemaFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const txt = reader.result;
+      setSchemaText(txt);
+      parseSchemaString(txt, file.name);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleParseClick = () => parseSchemaString(schemaText, schemaFileName);
+
+  const clearSchema = () => {
+    setSchemaFileName('');
+    setSchemaText('');
+    setParseError('');
+    localStorage.removeItem('expectedSchema');
+  };
+
   const runValidation = () => {
     localStorage.setItem('validationRules', JSON.stringify(rules));
+    localStorage.setItem('expectedSchema', JSON.stringify({ schemaFileName, schemaText, rules }));
     router.push('/results');
   };
 
@@ -94,6 +173,27 @@ export default function ValidationRulesPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-3 mb-4 text-blue-900">
           <div className="font-semibold">Data Source: <span className="text-blue-800">{sourceName}</span></div>
           <div className="text-xs text-blue-800">Type: {sourceType}</div>
+        </div>
+        {/* Schema Input */}
+        <div className="mb-6">
+          <div className="font-semibold text-gray-900 mb-2">Schema Definition</div>
+          {schemaFileName && (
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="text-gray-700">{schemaFileName}</span>
+              <button type="button" onClick={clearSchema} className="text-red-500 text-xs hover:underline">Remove</button>
+            </div>
+          )}
+          <input type="file" accept=".json,.yml,.yaml" onChange={handleSchemaFileChange} className="mb-2 text-sm" />
+          <textarea
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white text-gray-900 h-32 mb-2"
+            value={schemaText}
+            onChange={(e) => setSchemaText(e.target.value)}
+            placeholder="Paste JSON or YAML schema here"
+          />
+          <div className="flex items-center">
+            <button type="button" onClick={handleParseClick} className="px-3 py-1 bg-white border border-gray-300 rounded-md text-sm font-medium hover:bg-gray-100 text-black mr-2">Load Schema</button>
+            {parseError && <span className="text-red-600 text-sm">{parseError}</span>}
+          </div>
         </div>
         {/* Available columns as tags */}
         {columns.length > 0 && (
