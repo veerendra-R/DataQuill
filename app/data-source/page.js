@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Papa from 'papaparse';
 
@@ -19,6 +19,34 @@ export default function DataSourcePage() {
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState([]);
   const router = useRouter();
+
+  // Restore previously selected source on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('dataSource');
+    if (!stored) return;
+    try {
+      const data = JSON.parse(stored);
+      if (data.apiUrl) {
+        setApiUrl(data.apiUrl);
+        setTab('api');
+      }
+      if (data.mongoUri) {
+        setMongoUri(data.mongoUri);
+        setTab('mongo');
+      }
+      if (data.s3Path) {
+        setS3Path(data.s3Path);
+        setTab('s3');
+      }
+      if (Array.isArray(data.columns)) setColumns(data.columns);
+      if (Array.isArray(data.rows)) setRows(data.rows);
+      if (data.fileName) {
+        // Recreate minimal file info so UI shows selection
+        setFile({ name: data.fileName, size: data.fileSize || 0 });
+        setTab('file');
+      }
+    } catch {}
+  }, []);
 
   // CSV upload
   const handleFileChange = (e) => {
@@ -47,7 +75,13 @@ export default function DataSourcePage() {
   
   const handleNext = () => {
     const payload = {
-      apiUrl, mongoUri, s3Path, fileName: file?.name || '', columns, rows
+      apiUrl,
+      mongoUri,
+      s3Path,
+      fileName: file?.name || '',
+      fileSize: file?.size || 0,
+      columns,
+      rows
     };
     localStorage.setItem('dataSource', JSON.stringify(payload));
     router.push('/validation-rules');
